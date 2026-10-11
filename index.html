@@ -324,7 +324,7 @@ const addDays = (iso,n) => { const d=new Date(iso+'T00:00:00Z'); d.setUTCDate(d.
 const nextWorkday = iso => { let d=addDays(iso,1); while([0,6].includes(new Date(d+'T00:00:00Z').getUTCDay())) d=addDays(d,1); return d; };
 const todayISO = () => { const d=new Date(); return new Date(d.getTime()-d.getTimezoneOffset()*6e4).toISOString().slice(0,10); };
 const LS = (()=>{try{return window.localStorage}catch(e){return null}})();
-const kzt = o => o.kzt ?? o.amount;
+const kzt = o => (o.cur||'KZT')==='KZT' ? o.amount : 0;   // графики и итоги — только тенге; валюта отдельно
 
 let D=null, ops=[], accs=[], minD, maxD, anchorsBy={}, opsBy={};
 const APP = { editable:false, onEdit:null };
@@ -434,8 +434,9 @@ function render(){
   const filtered = S.cp||S.art||S.id||S.q;
   $('kOpen').textContent = money(tO); $('kOpenS').textContent = `на начало ${dmy(S.from)}, KZT`;
   $('kClose').textContent = money(tC); $('kCloseS').textContent = `на конец ${dmy(S.to)}`+(unknown?' · нет выписки для части счетов':'');
-  $('kIn').textContent = money(sIn); $('kInS').textContent = `${F.filter(o=>o.dir==='in').length} операций`+(filtered?' · с учётом фильтров':'');
-  $('kOut').textContent = money(sOut); $('kOutS').textContent = `${F.filter(o=>o.dir==='out').length} операций · чистый поток ${sIn-sOut>=0?'+':''}${short(sIn-sOut)}`;
+  const curN = F.filter(o=>(o.cur||'KZT')!=='KZT').length;
+  $('kIn').textContent = money(sIn); $('kInS').textContent = `${F.filter(o=>o.dir==='in'&&(o.cur||'KZT')==='KZT').length} операций, KZT`+(curN?` · валютных: ${curN} — в таблице`:'')+(filtered?' · с учётом фильтров':'');
+  $('kOut').textContent = money(sOut); $('kOutS').textContent = `${F.filter(o=>o.dir==='out'&&(o.cur||'KZT')==='KZT').length} операций · чистый поток ${sIn-sOut>=0?'+':''}${short(sIn-sOut)}`;
 
   drawChart(F);
   barList($('artBars'), F.filter(o=>o.dir===S.artDir), o=>o.art, S.art, v=>{ S.art = S.art===v?'':v; render(); }, 20);
@@ -445,7 +446,7 @@ function render(){
 }
 
 function barList(el, list, keyFn, selected, onPick, top){
-  const m = new Map(); list.forEach(o=>{ const k=keyFn(o)||'—'; m.set(k,(m.get(k)||0)+kzt(o)); });
+  const m = new Map(); list.forEach(o=>{ const v=kzt(o); if(!v) return; const k=keyFn(o)||'—'; m.set(k,(m.get(k)||0)+v); });
   const arr=[...m].sort((a,b)=>b[1]-a[1]); const shown=arr.slice(0,top); const rest=arr.slice(top).reduce((s,x)=>s+x[1],0);
   const max = shown.length? shown[0][1] : 1; const total = arr.reduce((s,x)=>s+x[1],0);
   const color = list[0] && list[0].dir==='in' ? 'var(--in)' : 'var(--out)';
@@ -502,7 +503,7 @@ const cols=[['date','Дата'],['company','Компания'],['cp','Контр
 let lastF=[];
 function opsTable(F){
   const {k,d}=S.sort;
-  const val=o=> k==='in'? (o.dir==='in'?kzt(o):-1) : k==='out'? (o.dir==='out'?kzt(o):-1) : k==='date'? o.date+' '+o.time : (o[k]||'');
+  const val=o=> k==='in'? (o.dir==='in'?o.amount:-1) : k==='out'? (o.dir==='out'?o.amount:-1) : k==='date'? o.date+' '+o.time : (o[k]||'');
   const arr=[...F].sort((a,b)=>{ const x=val(a),y=val(b); return (x>y?1:x<y?-1:0)*d; });
   lastF = arr;
   $('opsHint').textContent = `${arr.length} операций · заголовок — сортировка, контрагент/статья — фильтр` + (APP.editable?' · ✎ — поправить статью, ID, комментарий':'');
@@ -534,7 +535,7 @@ function buildMessage(kind, day, comps){
     const md = nextWorkday(day);
     lines.push(`Доброе утро. Остаток на начало ${dmy(md)}`);
     let t=0;
-    comps.forEach(c=>{ [...new Set(accs.filter(a=>a.company===c).map(a=>a.cur))].forEach(cur=>{
+    comps.forEach(c=>{ [...new Set(accs.filter(a=>a.company===c).map(a=>a.cur))].sort((a,b)=>a==='KZT'?-1:b==='KZT'?1:a.localeCompare(b)).forEach(cur=>{
       const v=accs.filter(a=>a.company===c&&a.cur===cur).reduce((s,a)=>s+(opening(a.iik,md)||0),0);
       if(cur==='KZT') t+=v; lines.push(pad(c+(cur!=='KZT'?' '+cur:''),w)+money(v)); }); });
     lines.push(pad('Итого',w)+money(t));
@@ -542,7 +543,7 @@ function buildMessage(kind, day, comps){
     const nd=addDays(day,1);
     lines.push(`Добрый вечер. Итоги дня ${dmy(day)}`,'');
     let ti=0,to=0,tc=0;
-    comps.forEach(c=>{ [...new Set(accs.filter(a=>a.company===c).map(a=>a.cur))].forEach(cur=>{
+    comps.forEach(c=>{ [...new Set(accs.filter(a=>a.company===c).map(a=>a.cur))].sort((a,b)=>a==='KZT'?-1:b==='KZT'?1:a.localeCompare(b)).forEach(cur=>{
       const ii=accs.filter(a=>a.company===c&&a.cur===cur).map(a=>a.iik);
       const dd=ops.filter(o=>ii.includes(o.iik)&&o.date===day);
       const i_=dd.filter(o=>o.dir==='in').reduce((s,o)=>s+o.amount,0), o_=dd.filter(o=>o.dir==='out').reduce((s,o)=>s+o.amount,0);
