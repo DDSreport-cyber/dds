@@ -281,7 +281,7 @@ dialog input[type=checkbox]{width:auto;margin:0}
   <div style="margin-bottom:16px;display:none" id="dBankWrap"><div class="card" style="border-color:var(--in)"><h2>💰 Пришла оплата по выписке — отразить в 1С</h2><div class="hint" id="dBankHint"></div><div class="scroll"><table id="dBankTbl"></table></div></div></div>
   <div style="margin-bottom:16px"><div class="card" id="dChCard"><h2>Изменения за неделю</h2><div class="hint" id="dChHint"></div><div class="scroll"><table id="dChTbl"></table></div></div></div>
   <div class="card">
-    <div class="ch"><div><h2>Реестр долгов</h2><div class="hint" id="dHint"></div></div><button class="btn" id="dCsv">Скачать Excel (CSV)</button></div>
+    <div class="ch"><div><h2>Реестр долгов</h2><div class="hint" id="dHint"></div></div><div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn primary" id="dXlsx" title="Excel с жёлтыми колонками для комментариев и статусов">Скачать Excel для комментариев</button><button class="btn" id="dCsv">CSV</button></div></div>
     <div class="scroll"><table class="ops" id="dTbl"></table></div>
   </div>
 </div>
@@ -293,9 +293,9 @@ dialog input[type=checkbox]{width:auto;margin:0}
     <label>Оборудование</label><input id="dEquip">
     <label>ID</label><input id="dId">
     <label>Дата образования долга</label><input id="dDate0" type="date">
-    <label>Статус</label><input id="dSt" list="dStList"><datalist id="dStList"><option>Не закрыто</option><option>Закрыто</option><option>Сделать операцию за штраф</option><option>Суд</option></datalist>
-    <label>Комментарий</label><input id="dCom">
-    <label>Статус оплаты</label><input id="dPay">
+    <label>Статус (финансист)</label><input id="dSt" list="dStList"><datalist id="dStList"><option>Не закрыто</option><option>Закрыто</option><option>Сделать операцию за штраф</option><option>Суд</option></datalist>
+    <label>Комментарий бухгалтера (что за долг, за что)</label><input id="dCom">
+    <label>Действия финансиста</label><input id="dPay">
     <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px">
       <button class="btn" value="cancel">Отмена</button><button class="btn primary" value="ok">Сохранить</button>
     </div>
@@ -693,6 +693,87 @@ const DDSCrypto = (()=>{
   return {encrypt,decrypt,sha256,hmac,pbkdf2js,ctr};
 })();
 
+/* ---------- запись XLSX ---------- */
+const CRC=(()=>{const t=new Uint32Array(256);for(let n=0;n<256;n++){let c=n;for(let k=0;k<8;k++)c=c&1?0xEDB88320^(c>>>1):c>>>1;t[n]=c>>>0;}return t;})();
+const crc32=u=>{let c=0xFFFFFFFF;for(let i=0;i<u.length;i++)c=CRC[(c^u[i])&255]^(c>>>8);return (c^0xFFFFFFFF)>>>0;};
+function zipStore(files, type){
+  const enc=new TextEncoder(), parts=[], cd=[]; let off=0;
+  for(const f of files){ const nm=enc.encode(f.name), data=typeof f.data==='string'?enc.encode(f.data):f.data, crc=crc32(data);
+    const lh=new DataView(new ArrayBuffer(30)); lh.setUint32(0,0x04034b50,true); lh.setUint16(4,20,true); lh.setUint16(6,0x0800,true); lh.setUint16(12,0x21,true); lh.setUint32(14,crc,true); lh.setUint32(18,data.length,true); lh.setUint32(22,data.length,true); lh.setUint16(26,nm.length,true);
+    parts.push(new Uint8Array(lh.buffer),nm,data);
+    const ch=new DataView(new ArrayBuffer(46)); ch.setUint32(0,0x02014b50,true); ch.setUint16(4,20,true); ch.setUint16(6,20,true); ch.setUint16(8,0x0800,true); ch.setUint16(14,0x21,true); ch.setUint32(16,crc,true); ch.setUint32(20,data.length,true); ch.setUint32(24,data.length,true); ch.setUint16(28,nm.length,true); ch.setUint32(42,off,true);
+    cd.push(new Uint8Array(ch.buffer),nm); off+=30+nm.length+data.length; }
+  const cs=cd.reduce((s,a)=>s+a.length,0); const e=new DataView(new ArrayBuffer(22)); e.setUint32(0,0x06054b50,true); e.setUint16(8,files.length,true); e.setUint16(10,files.length,true); e.setUint32(12,cs,true); e.setUint32(16,off,true);
+  return new Blob([...parts,...cd,new Uint8Array(e.buffer)],{type});
+}
+const xesc = s => String(s??'').replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g,'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+const colName = i => { let s=''; i++; while(i){ const m=(i-1)%26; s=String.fromCharCode(65+m)+s; i=Math.floor((i-1)/26);} return s; };
+/* стили: 0 обычный,1 жирный,2 сумма,3 шапка синяя,4 дата,5 жирная сумма,6 перенос,7 блок компании,8 сумма блока,9 подшапка,10 заголовок */
+const STYLES=`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+<fonts count="4"><font><sz val="11"/><name val="Calibri"/></font><font><b/><sz val="11"/><name val="Calibri"/></font><font><b/><sz val="11"/><color rgb="FFFFFFFF"/><name val="Calibri"/></font><font><b/><sz val="14"/><name val="Calibri"/></font></fonts>
+<fills count="6"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill><fill><patternFill patternType="solid"><fgColor rgb="FF2A78D6"/></patternFill></fill><fill><patternFill patternType="solid"><fgColor rgb="FFEAF2FC"/></patternFill></fill><fill><patternFill patternType="solid"><fgColor rgb="FFFFF6D6"/></patternFill></fill><fill><patternFill patternType="solid"><fgColor rgb="FFEB6834"/></patternFill></fill></fills>
+<borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders>
+<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>
+<cellXfs count="14"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/><xf numFmtId="0" fontId="1" fillId="0" borderId="0" xfId="0" applyFont="1"/>
+<xf numFmtId="4" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/><xf numFmtId="0" fontId="2" fillId="2" borderId="0" xfId="0" applyFont="1" applyFill="1" applyAlignment="1"><alignment vertical="center" wrapText="1"/></xf>
+<xf numFmtId="14" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/><xf numFmtId="4" fontId="1" fillId="0" borderId="0" xfId="0" applyNumberFormat="1" applyFont="1"/>
+<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0" applyAlignment="1"><alignment vertical="top" wrapText="1"/></xf><xf numFmtId="0" fontId="2" fillId="2" borderId="0" xfId="0" applyFont="1" applyFill="1"/>
+<xf numFmtId="4" fontId="2" fillId="2" borderId="0" xfId="0" applyNumberFormat="1" applyFont="1" applyFill="1"/><xf numFmtId="0" fontId="1" fillId="3" borderId="0" xfId="0" applyFont="1" applyFill="1"/>
+<xf numFmtId="0" fontId="3" fillId="0" borderId="0" xfId="0" applyFont="1"/><xf numFmtId="0" fontId="0" fillId="4" borderId="0" xfId="0" applyFill="1" applyAlignment="1"><alignment vertical="top" wrapText="1"/></xf><xf numFmtId="0" fontId="2" fillId="5" borderId="0" xfId="0" applyFont="1" applyFill="1" applyAlignment="1"><alignment vertical="center" wrapText="1"/></xf><xf numFmtId="14" fontId="0" fillId="4" borderId="0" xfId="0" applyNumberFormat="1" applyFill="1"/></cellXfs><cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles></styleSheet>`;
+function sheetXml(sh){
+  let x='<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">';
+  if(sh.freeze) x+='<sheetViews><sheetView workbookViewId="0"><pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews>';
+  if(sh.widths) x+='<cols>'+sh.widths.map((w,i)=>`<col min="${i+1}" max="${i+1}" width="${w}" customWidth="1"${sh.hidden&&sh.hidden.includes(i)?' hidden="1"':''}/>`).join('')+'</cols>';
+  x+='<sheetData>';
+  sh.rows.forEach((row,ri)=>{ if(!row||!row.length) return; x+=`<row r="${ri+1}">`;
+    row.forEach((c,ci)=>{ if(c==null) return; if(typeof c!=='object') c={v:c}; const r=colName(ci)+(ri+1), s=c.s?` s="${c.s}"`:'';
+      if(c.f) x+=`<c r="${r}"${s}><f>${xesc(c.f)}</f></c>`;
+      else if(typeof c.v==='number' && isFinite(c.v)) x+=`<c r="${r}"${s}><v>${c.v}</v></c>`;
+      else if(c.v!=null && c.v!=='') x+=`<c r="${r}"${s} t="inlineStr"><is><t xml:space="preserve">${xesc(c.v)}</t></is></c>`;
+      else if(c.s) x+=`<c r="${r}"${s}/>`; });
+    x+='</row>'; });
+  x+='</sheetData>';
+  if(sh.filter) x+=`<autoFilter ref="${sh.filter}"/>`;
+  if(sh.dv&&sh.dv.length) x+=`<dataValidations count="${sh.dv.length}">`+sh.dv.map(d=>`<dataValidation type="list" allowBlank="1" showErrorMessage="0" sqref="${d.sqref}"><formula1>${xesc(d.list)}</formula1></dataValidation>`).join('')+'</dataValidations>';
+  return x+'</worksheet>';
+}
+function writeXlsx(sheets){
+  const files=[
+    {name:'[Content_Types].xml',data:'<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>'+sheets.map((s,i)=>`<Override PartName="/xl/worksheets/sheet${i+1}.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>`).join('')+'</Types>'},
+    {name:'_rels/.rels',data:'<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>'},
+    {name:'xl/workbook.xml',data:'<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets>'+sheets.map((s,i)=>`<sheet name="${xesc(s.name)}" sheetId="${i+1}"${s.hiddenSheet?' state="hidden"':''} r:id="rId${i+1}"/>`).join('')+'</sheets>'+(sheets.some(s=>s.filter)?'<definedNames>'+sheets.map((s,i)=>s.filter?`<definedName name="_xlnm._FilterDatabase" localSheetId="${i}" hidden="1">'${xesc(s.name)}'!${s.filter.replace(/([A-Z]+)(\d+)/g,'$$$1$$$2')}</definedName>`:'').join('')+'</definedNames>':'')+'<calcPr calcId="191029" fullCalcOnLoad="1"/></workbook>'},
+    {name:'xl/_rels/workbook.xml.rels',data:'<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'+sheets.map((s,i)=>`<Relationship Id="rId${i+1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet${i+1}.xml"/>`).join('')+`<Relationship Id="rId${sheets.length+1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>`},
+    {name:'xl/styles.xml',data:STYLES},
+    ...sheets.map((s,i)=>({name:`xl/worksheets/sheet${i+1}.xml`,data:sheetXml(s)}))];
+  return zipStore(files,'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+}
+const serial = iso => (Date.UTC(+iso.slice(0,4),+iso.slice(5,7)-1,+iso.slice(8,10))-Date.UTC(1899,11,30))/864e5;
+
+
+/* реестр долгов в Excel: жёлтые колонки — для заполнения, скрытая колонка «Ключ» — для обратной загрузки */
+const DEBT_COLS=[['key','Ключ'],['id','ID'],['cp','Больница'],['comp','Компания'],['contract','Договор'],['purpose','Назначение'],['acc','Счёт'],['sk','Долг по 1С'],['ch','Изм. за неделю'],
+  ['date0','Дата образования'],['equip','Оборудование'],['comment','Комментарий бухгалтера (что за долг, за что)'],['status','Статус'],['paystatus','Действия финансиста']];
+const DEBT_EDIT=new Set(['id','date0','equip','comment','status','paystatus']);
+function debtExcel(dd){
+  const act=dd.lines.filter(l=>l.sk>0).sort((a,b)=>(a.comp+a.cp).localeCompare(b.comp+b.cp)||b.sk-a.sk);
+  const reg={name:'Реестр',freeze:true,widths:[6,10,55,12,38,22,7,16,15,14,34,50,18,50],hidden:[0],rows:[]};
+  reg.rows.push(DEBT_COLS.map(([k,t])=>({v:t,s:DEBT_EDIT.has(k)?12:3})));
+  act.forEach(l=>{ const ch=l.prev==null?null:Math.round((l.sk-l.prev)*100)/100;
+    reg.rows.push(DEBT_COLS.map(([k])=>{ const ed=DEBT_EDIT.has(k);
+      if(k==='sk') return {v:l.sk,s:2}; if(k==='ch') return ch==null?null:{v:ch,s:2};
+      if(k==='date0') return l.date0?{v:serial(l.date0),s:13}:{v:'',s:11};
+      const v=l[k]||''; return ed? {v,s:11} : (k==='cp'||k==='contract'? {v,s:6} : v||null); })); });
+  const n=act.length+1;
+  reg.rows.push([null,null,{v:'ИТОГО',s:1},null,null,null,null,{f:`SUM(H2:H${n})`,s:5}]);
+  reg.filter=`A1:N${n}`; reg.dv=[{sqref:`M2:M${n}`,list:'"Не закрыто,Закрыто,Сделать операцию за штраф,Суд"'}];
+  const meta={name:'_meta',hiddenSheet:true,rows:[['exportedAt',dd.genISO||new Date().toISOString()],['asOf',dd.asOf||'']]};
+  const help={name:'Как заполнять',widths:[110],rows:[[{v:'Заполняйте только ЖЁЛТЫЕ колонки. Остальное берётся из 1С автоматически.',s:1}],
+    ['Бухгалтер — «Комментарий бухгалтера»: что за долг и за что. Финансист — «Статус» (выбор из списка) и «Действия финансиста».'],
+    ['Строки не удаляйте и не меняйте порядок колонок. Сохраните файл и передайте бухгалтеру.'],
+    ['Бухгалтер кладёт файл в папку 5_Комментарии и нажимает «Обновить» — комментарии попадут в отчёт и на сайт.']]};
+  return writeXlsx([reg,help,meta]);
+}
+
 /* ===================== ЗАДОЛЖЕННОСТЬ БОЛЬНИЦ — просмотр ===================== */
 let DD=null; const DS={comps:new Set(),q:'',purpose:'',status:'',age:'',changed:false,sort:{k:'sk',d:-1}};
 const DEBT={editable:false,onEdit:null};
@@ -777,7 +858,7 @@ function renderDebt(){
   const {k,d}=DS.sort; const val=l=>k==='sk'?l.sk:k==='ch'?(l._ch||0):k==='d'?(l._d??-1):String(l[k]||'');
   const A=[...F].sort((a,b)=>{ const x=val(a),y=val(b); return (x>y?1:x<y?-1:0)*d; });
   $('dHint').textContent=`${A.length} позиций · заголовок — сортировка`+(DEBT.editable?' · ✎ — комментарий, статус, дата образования':'');
-  const H=[['cp','Больница'],['comp','Компания'],['contract','Договор / назначение'],['sk','Долг'],['ch','За неделю'],['d','Дней'],['status','Статус'],['comment','Комментарий']];
+  const H=[['cp','Больница'],['comp','Компания'],['contract','Договор / назначение'],['sk','Долг'],['ch','За неделю'],['d','Дней'],['comment','Комментарий бухгалтера'],['status','Финансист: статус и действия']];
   $('dTbl').innerHTML='<tr>'+H.map(([c,t])=>`<th data-s="${c}" class="${['sk','ch','d'].includes(c)?'n':''}">${t}${k===c?(d>0?' ↑':' ↓'):''}</th>`).join('')+'</tr>'+
     (A.map(l=>`<tr>
       <td class="c">${esc(l.cp)}${l.manual?' <span class="tag">вне 1С</span>':''}${l.isNew?' <span class="tag" style="background:var(--warn-bg);color:var(--warn-ink)">новое</span>':''}${l.bank?` <span class="tag" style="background:var(--chip);color:var(--accent)">оплачено по выписке ${dmy(l.bank.date)} — отразить в 1С</span>`:''}${l.equip?`<div class="sub">${esc(l.equip)}</div>`:''}${l.id?`<div class="sub">ID ${esc(l.id)}</div>`:''}</td>
@@ -786,8 +867,8 @@ function renderDebt(){
       <td class="n"><b>${money(l.sk)}</b></td>
       <td class="n">${l._ch&&Math.abs(l._ch)>=1?`<span style="color:${l._ch<0?'var(--in)':'var(--out)'}">${l._ch>0?'+':''}${money(l._ch)}</span>`:'—'}</td>
       <td class="n">${l._d==null?'—':l._d}${l.date0?`<div class="sub">с ${dmy(l.date0)}</div>`:''}</td>
-      <td>${esc(l.status||'—')}${DEBT.editable?` <button class="edit" data-key="${esc(l.key)}">✎</button>`:''}</td>
-      <td class="p">${esc(l.comment)}${l.paystatus?`<div style="color:var(--ink)">💬 ${esc(l.paystatus)}</div>`:''}</td></tr>`).join('')||'<tr><td colspan="8" class="empty">Нет позиций по фильтрам</td></tr>');
+      <td class="p">${esc(l.comment)}${DEBT.editable?` <button class="edit" data-key="${esc(l.key)}" title="Править">✎</button>`:''}</td>
+      <td class="p"><b style="color:${/^закрыт/i.test(l.status||'')?'var(--in)':'var(--ink)'}">${esc(l.status||'—')}</b>${l.paystatus?`<div>${esc(l.paystatus)}</div>`:''}</td></tr>`).join('')||'<tr><td colspan="8" class="empty">Нет позиций по фильтрам</td></tr>');
   $('dTbl').querySelectorAll('th[data-s]').forEach(th=>th.onclick=()=>{ const c=th.dataset.s; DS.sort=DS.sort.k===c?{k:c,d:-DS.sort.d}:{k:c,d:['sk','ch','d'].includes(c)?-1:1}; renderDebt(); });
   $('dTbl').querySelectorAll('button.edit').forEach(b=>b.onclick=()=>DEBT.onEdit&&DEBT.onEdit(b.dataset.key));
   window.__DF=A;
@@ -803,6 +884,7 @@ $('dCsv').onclick=()=>{ const q=s=>'"'+String(s??'').replace(/"/g,'""')+'"';
   const rows=[['Больница','Компания','Договор','Назначение','Счёт','Долг','Изменение за неделю','Дата образования','Дней','Статус','Комментарий','Статус оплаты','Оборудование','ID'].map(q).join(';')];
   (window.__DF||[]).forEach(l=>rows.push([l.cp,l.comp,l.contract,l.purpose,l.acc,String(l.sk).replace('.',','),l._ch==null?'':String(l._ch).replace('.',','),l.date0?dmy(l.date0):'',l._d??'',l.status,l.comment,l.paystatus,l.equip,l.id].map(q).join(';')));
   downloadBlob(new Blob(['﻿'+rows.join('\r\n')],{type:'text/csv;charset=utf-8'}),`Долги_больниц_${DD.asOf}.csv`); };
+$('dXlsx').onclick=()=>{ if(DD) downloadBlob(debtExcel(DD),`Долги_больниц_${DD.asOf}.xlsx`); };
 $('viewTabs').onclick=e=>{ const b=e.target.closest('button'); if(!b) return; showDebtMode(b.dataset.v==='debt'); };
 
 const openData=d=>{ if(d&&d.kind==='all'){ $('viewTabs').classList.remove('apponly'); $('viewTabs').style.display=''; setData(d.dds); if(d.debt) setDebtData(d.debt); else $('viewTabs').style.display='none'; showDebtMode(false); }
