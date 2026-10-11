@@ -294,7 +294,7 @@ dialog input[type=checkbox]{width:auto;margin:0}
     <label>Оборудование</label><input id="dEquip">
     <label>ID</label><input id="dId">
     <label>Дата образования долга</label><input id="dDate0" type="date">
-    <label>Статус (Балмуханов Аян)</label><input id="dSt" list="dStList"><datalist id="dStList"><option>Не закрыто</option><option>Закрыто</option><option>Сделать операцию за штраф</option><option>Суд</option></datalist>
+    <label>Статус (Балмуханов Аян)</label><select id="dSt"></select>
     <label>Комментарий бухгалтера (что за долг, за что)</label><input id="dCom">
     <label>Действия (Балмуханов Аян)</label><input id="dPay">
     <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px">
@@ -768,7 +768,7 @@ function debtExcel(dd){
       const v=l[k]||''; return ed? {v,s:11} : (k==='cp'||k==='contract'? {v,s:6} : v||null); })); });
   const n=act.length+1;
   reg.rows.push([null,null,{v:'ИТОГО',s:1},null,null,null,null,{f:`SUM(H2:H${n})`,s:5}]);
-  reg.filter=`A1:N${n}`; reg.dv=[{sqref:`M2:M${n}`,list:'"Не закрыто,Закрыто,Сделать операцию за штраф,Суд"'}];
+  reg.filter=`A1:N${n}`; reg.dv=[{sqref:`M2:M${n}`,list:'"Не закрыто,Закрыто,Частично оплачено,Ожидаем оплату,Сделать операцию за штраф,Суд"'}];
   const meta={name:'_meta',hiddenSheet:true,rows:[['exportedAt',dd.genISO||new Date().toISOString()],['asOf',dd.asOf||'']]};
   const help={name:'Как заполнять',widths:[110],rows:[[{v:'Заполняйте только ЖЁЛТЫЕ колонки. Остальное берётся из 1С автоматически.',s:1}],
     ['Бухгалтер — «Комментарий бухгалтера»: что за долг и за что. Балмуханов Аян — «Статус» (выбор из списка) и «Действия (Балмуханов Аян)».'],
@@ -804,6 +804,10 @@ function setDebtData(data){
   if(DD.edit && !APP.editable){ DEBT.onEdit=siteEdit; siteEditInit(); }
 }
 
+
+const DEBT_STATUSES=['Не закрыто','Закрыто','Частично оплачено','Ожидаем оплату','Сделать операцию за штраф','Суд'];
+function fillStatus(cur){ const list=DEBT_STATUSES.includes(cur)||!cur? DEBT_STATUSES : [cur,...DEBT_STATUSES];
+  $('dSt').innerHTML=list.map(s=>`<option ${s===(cur||'Не закрыто')?'selected':''}>${esc(s)}</option>`).join(''); }
 /* ---------- правки Аяна прямо на сайте → закрытое хранилище GitHub (comments.json) ---------- */
 const NOTES={who:'Балмуханов Аян'};
 const u8b64=u=>{ let s=''; for(let i=0;i<u.length;i+=32768) s+=String.fromCharCode.apply(null,u.subarray(i,i+32768)); return btoa(s); };
@@ -846,7 +850,7 @@ function siteEdit(key){
   $('dDlgInfo').textContent=`${l.comp} · ${l.cp} · ${l.contract} · ${money(l.sk)}`;
   ['dEquip','dId','dDate0','dCom'].forEach(id=>{ $(id).disabled=true; });
   $('dEquip').value=l.equip||''; $('dId').value=l.id||''; $('dDate0').value=l.date0||''; $('dCom').value=l.comment||'';
-  $('dSt').value=l.status||''; $('dPay').value=l.paystatus||'';
+  fillStatus(l.status); $('dPay').value=l.paystatus||'';
   const dlg=$('dDlg'); dlg.returnValue=''; dlg.showModal();
   dlg.onclose=async()=>{ if(dlg.returnValue!=='ok') return;
     const f={status:$('dSt').value.trim(),paystatus:$('dPay').value.trim()};
