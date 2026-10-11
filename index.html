@@ -117,6 +117,10 @@ dialog input[type=checkbox]{width:auto;margin:0}
 .spin{display:inline-block;width:12px;height:12px;border:2px solid var(--line);border-top-color:var(--accent);border-radius:50%;animation:sp 0.8s linear infinite;vertical-align:-2px;margin-right:6px}
 @keyframes sp{to{transform:rotate(360deg)}}
 .snap .apponly{display:none!important}
+#dTbl td.c{min-width:220px;max-width:320px}
+#dTbl td.p{min-width:200px;max-width:300px}
+#dTbl td:last-child{min-width:240px}
+#dTbl .sub{font-size:12px}
 @media print{.appbar,.edit{display:none!important}}
 </style>
 </head>
@@ -145,11 +149,14 @@ dialog input[type=checkbox]{width:auto;margin:0}
     <input type="file" id="dirInput" webkitdirectory multiple style="display:none">
   </div>
 
+  <div class="seg apponly" id="viewTabs" style="margin-bottom:12px"><button data-v="dds" class="on">ДДС</button><button data-v="debt">Долги больниц</button></div>
+
   <div class="welcome apponly" id="welcome" style="display:none">
     <h2>Добро пожаловать 👋</h2>
     <ol>
       <li>Нажмите <b>«Выбрать папку»</b> и укажите папку <b>ДДС_Автомат</b> (в ней лежат 1_Выписки, 2_Справочник, 3_Отчеты).</li>
       <li>Браузер спросит разрешение — нажмите <b>«Разрешить»</b> / «Изменить файлы». Папка запомнится.</li>
+      <li>Раз в неделю кладите выгрузки «Анализ субконто» из 1С в <b>4_Субконто</b> — появится раздел «Долги больниц».</li>
       <li>Каждый день кладите выписки ForteBank (Excel или PDF) в <b>1_Выписки</b> — отчёт обновится сам, пока эта страница открыта, или по кнопке «Обновить».</li>
     </ol>
     <button class="btn primary" id="pickBtn2">Выбрать папку ДДС_Автомат</button>
@@ -246,6 +253,55 @@ dialog input[type=checkbox]{width:auto;margin:0}
   </div>
 </div>
 
+<div class="wrap" id="debtView" style="display:none;padding-top:0">
+  <div class="filters">
+    <div class="frow"><div class="chips" id="dComps"></div></div>
+    <div class="fgrid">
+      <input id="dQ" placeholder="Больница, договор, комментарий">
+      <select id="dPurpose"><option value="">Все назначения</option></select>
+      <select id="dStatus"><option value="">Все статусы</option></select>
+      <select id="dAge"><option value="">Любой срок</option></select>
+      <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+        <label class="tog"><input type="checkbox" id="dChanged"> Только изменения</label>
+        <button class="btn" id="dReset">Сбросить</button>
+      </div>
+    </div>
+  </div>
+  <div class="kpis">
+    <div class="kpi"><div class="l">Общий долг больниц</div><div class="v" id="dkTot"></div><div class="s" id="dkTotS"></div></div>
+    <div class="kpi"><div class="l"><span class="dot" style="background:var(--in)"></span>За оборудование</div><div class="v" id="dkEq"></div><div class="s" id="dkEqS"></div></div>
+    <div class="kpi"><div class="l"><span class="dot" style="background:var(--out)"></span>Обеспечение (3% и др.)</div><div class="v" id="dkGar"></div><div class="s" id="dkGarS"></div></div>
+    <div class="kpi"><div class="l">Изменение за неделю</div><div class="v" id="dkCh"></div><div class="s" id="dkChS"></div></div>
+  </div>
+  <div style="margin-bottom:16px"><div class="card"><h2>По компаниям</h2><div class="hint">Нажмите на компанию — отфильтровать</div><div class="scroll"><table id="dCompTbl"></table></div></div></div>
+  <div class="grid2">
+    <div class="card"><h2>Крупнейшие должники</h2><div class="hint">Топ-12 · нажмите — отфильтровать</div><div class="bars" id="dTop"></div></div>
+    <div class="card"><h2>Сроки задолженности</h2><div class="hint">С даты образования долга · нажмите — отфильтровать</div><div class="bars" id="dAgeBars"></div></div>
+  </div>
+  <div style="margin-bottom:16px;display:none" id="dBankWrap"><div class="card" style="border-color:var(--in)"><h2>💰 Пришла оплата по выписке — отразить в 1С</h2><div class="hint" id="dBankHint"></div><div class="scroll"><table id="dBankTbl"></table></div></div></div>
+  <div style="margin-bottom:16px"><div class="card" id="dChCard"><h2>Изменения за неделю</h2><div class="hint" id="dChHint"></div><div class="scroll"><table id="dChTbl"></table></div></div></div>
+  <div class="card">
+    <div class="ch"><div><h2>Реестр долгов</h2><div class="hint" id="dHint"></div></div><button class="btn" id="dCsv">Скачать Excel (CSV)</button></div>
+    <div class="scroll"><table class="ops" id="dTbl"></table></div>
+  </div>
+</div>
+
+<dialog id="dDlg">
+  <form method="dialog">
+    <h2 style="margin:0 0 4px;font-size:16px">Комментарии по долгу</h2>
+    <div class="sub" id="dDlgInfo"></div>
+    <label>Оборудование</label><input id="dEquip">
+    <label>ID</label><input id="dId">
+    <label>Дата образования долга</label><input id="dDate0" type="date">
+    <label>Статус</label><input id="dSt" list="dStList"><datalist id="dStList"><option>Не закрыто</option><option>Закрыто</option><option>Сделать операцию за штраф</option><option>Суд</option></datalist>
+    <label>Комментарий</label><input id="dCom">
+    <label>Статус оплаты</label><input id="dPay">
+    <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px">
+      <button class="btn" value="cancel">Отмена</button><button class="btn primary" value="ok">Сохранить</button>
+    </div>
+  </form>
+</dialog>
+
 <dialog id="dlg">
   <form method="dialog">
     <h2 style="margin:0 0 4px;font-size:16px">Разметка операции</h2>
@@ -299,6 +355,8 @@ dialog input[type=checkbox]{width:auto;margin:0}
     <label>Название репозитория</label><input id="ghRepo" placeholder="dds" autocomplete="off" spellcheck="false">
     <label>Токен GitHub (Fine-grained, доступ Contents: Read and write)</label><input id="ghToken" type="password" placeholder="github_pat_..." autocomplete="off">
     <label>Пароль для руководителя (не короче 12 символов)</label><input id="ghPass" type="password" autocomplete="new-password">
+    <label>Пароль для отчёта «Долги больниц» (второй руководитель)</label><input id="ghPass2" type="password" autocomplete="new-password">
+    <label>Пароль для общей ссылки «Все отчёты»</label><input id="ghPass3" type="password" autocomplete="new-password">
     <label class="tog" style="margin-top:10px"><input type="checkbox" id="ghOn" checked> Обновлять сайт автоматически</label>
     <div id="ghMsg" style="font-size:13px;margin-top:12px;color:var(--ink-2)"></div>
     <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px;flex-wrap:wrap">
@@ -346,7 +404,7 @@ function setData(data){
   $('idList').innerHTML = ids.map(c=>`<option value="${esc(c)}">`).join('');
   const used = new Set(ops.map(o=>o.art));
   $('art').innerHTML = '<option value="">Все статьи</option>' + [...D.articles.filter(a=>used.has(a)), ...[...used].filter(a=>!D.articles.includes(a))].map(a=>`<option>${esc(a)}</option>`).join('');
-  $('dash').style.display = ops.length ? '' : 'none';
+  $('dash').style.display = (ops.length && $('debtView').style.display==='none') ? '' : 'none';
   if(!S.from || S.preset) setPreset(S.preset||'day');
   render();
 }
@@ -635,10 +693,124 @@ const DDSCrypto = (()=>{
   return {encrypt,decrypt,sha256,hmac,pbkdf2js,ctr};
 })();
 
+/* ===================== ЗАДОЛЖЕННОСТЬ БОЛЬНИЦ — просмотр ===================== */
+let DD=null; const DS={comps:new Set(),q:'',purpose:'',status:'',age:'',changed:false,sort:{k:'sk',d:-1}};
+const DEBT={editable:false,onEdit:null};
+const AGES=[['0-30','до 30 дней',0,30],['31-90','1–3 месяца',31,90],['91-180','3–6 месяцев',91,180],['181-365','6–12 месяцев',181,365],['365+','больше года',366,1e9],['none','дата не указана',null,null]];
+const daysSince=(iso,asOf)=>iso? Math.round((new Date(asOf+'T00:00:00Z')-new Date(iso+'T00:00:00Z'))/864e5) : null;
+const ageKey=d=>{ if(d==null) return 'none'; for(const a of AGES) if(a[2]!=null && d>=a[2] && d<=a[3]) return a[0]; return 'none'; };
+function showDebtMode(on){
+  $('dash').style.display = on? 'none' : (ops.length? '' : 'none');
+  $('debtView').style.display = on? '' : 'none';
+  document.querySelector('h1').textContent = on? 'Задолженность больниц' : 'Движение денежных средств';
+  document.querySelector('.wrap').style.paddingBottom = on? '0' : '';
+  $('csv').style.display = on? 'none' : '';
+  [...$('viewTabs').children].forEach(b=>b.classList.toggle('on',(b.dataset.v==='debt')===on));
+  if(on && DD) $('sub').textContent = debtSub();
+  else if(!on && D) setData(D);
+}
+const debtSub=()=> DD? `Данные 1С на ${dmy(DD.asOf)}`+(DD.prevDate?` · сравнение с ${dmy(DD.prevDate)}`:' · сравнения пока нет (нужна выгрузка за прошлую неделю)')+` · обновлено ${DD.generated}` : '';
+function setDebtData(data){
+  DD=data; DD.lines.forEach(l=>{ l._d=daysSince(l.date0,DD.asOf); l._age=ageKey(l._d); l._ch=(l.prev==null)?null:Math.round((l.sk-l.prev)*100)/100;
+    l._t=[l.cp,l.contract,l.comment,l.equip,l.id,l.paystatus,l.note,l.comp].join(' ').toLowerCase(); });
+  const P=[...new Set(DD.lines.map(l=>l.purpose))]; $('dPurpose').innerHTML='<option value="">Все назначения</option>'+P.map(p=>`<option>${esc(p)}</option>`).join('');
+  const St=[...new Set(DD.lines.map(l=>l.status||'—'))].sort(); $('dStatus').innerHTML='<option value="">Все статусы</option>'+St.map(p=>`<option>${esc(p)}</option>`).join('');
+  $('dAge').innerHTML='<option value="">Любой срок</option>'+AGES.map(a=>`<option value="${a[0]}">${a[1]}</option>`).join('');
+  $('sub').textContent=debtSub(); renderDebt();
+}
+function dIn(l,ign={}){
+  if(DS.comps.size && !DS.comps.has(l.comp)) return false;
+  if(!ign.purpose && DS.purpose && l.purpose!==DS.purpose) return false;
+  if(DS.status && (l.status||'—')!==DS.status) return false;
+  if(!ign.age && DS.age && l._age!==DS.age) return false;
+  if(DS.q && !l._t.includes(DS.q)) return false;
+  if(DS.changed && !(l._ch && Math.abs(l._ch)>=1)) return false;
+  return true;
+}
+function renderDebt(){
+  if(!DD) return;
+  $('dComps').innerHTML=`<button class="chip ${DS.comps.size?'':'on'}" data-c="">Все компании</button>`+DD.order.map(c=>`<button class="chip ${DS.comps.has(c)?'on':''}" data-c="${esc(c)}">${esc(c)}</button>`).join('');
+  $('dPurpose').value=DS.purpose; $('dStatus').value=DS.status; $('dAge').value=DS.age; $('dChanged').checked=DS.changed;
+  const act=DD.lines.filter(l=>l.sk>0);
+  const F=act.filter(l=>dIn(l));
+  const sum=(a,f)=>a.reduce((s,l)=>s+(f?f(l):l.sk),0);
+  const isEq=l=>l.purpose==='За оборудование', isGar=l=>l.purpose==='Обеспечение (3% и др.)';
+  const bankPaid=sum(F.filter(l=>l.bank),l=>Math.min(l.sk,l.bank.amount));
+  const tot=sum(F)-bankPaid, eq=sum(F.filter(isEq),l=>l.sk-(l.bank?Math.min(l.sk,l.bank.amount):0)), gar=sum(F.filter(isGar),l=>l.sk-(l.bank?Math.min(l.sk,l.bank.amount):0));
+  const chAll=DD.prevDate? sum(DD.lines.filter(l=>dIn(l)),l=>l._ch||0) : null;
+  $('dkTot').textContent=money(tot); $('dkTotS').textContent= bankPaid? `по 1С ${short(tot+bankPaid)} · оплачено по выписке ${short(bankPaid)}` : `${new Set(F.map(l=>l.cp)).size} больниц · ${F.length} позиций`;
+  $('dkEq').textContent=money(eq); $('dkEqS').textContent=tot?`${(eq/tot*100).toFixed(0)}% от долга`:'';
+  $('dkGar').textContent=money(gar); $('dkGarS').textContent=tot?`${(gar/tot*100).toFixed(0)}% от долга`:'';
+  $('dkCh').textContent= chAll==null? '—' : (chAll>0?'+':'')+money(chAll); $('dkChS').textContent= chAll==null? 'нет прошлой выгрузки' : chAll<0? 'долг уменьшился' : chAll>0? 'долг вырос' : 'без изменений';
+  // по компаниям
+  let rows='', T=[0,0,0,0,0];
+  DD.order.forEach(c=>{ const L=act.filter(l=>l.comp===c&&dIn(l,{})&&true).filter(l=>!DS.comps.size||DS.comps.has(c)); if(!L.length && !DD.lines.some(l=>l.comp===c&&l._ch)) return;
+    const e=sum(L.filter(isEq)), g=sum(L.filter(isGar)), t=sum(L), o=Math.abs(t-e-g)<0.5?0:Math.round((t-e-g)*100)/100, ch=DD.prevDate? sum(DD.lines.filter(l=>l.comp===c),l=>l._ch||0):null;
+    T[0]+=e;T[1]+=g;T[2]+=o;T[3]+=t;T[4]+=ch||0;
+    rows+=`<tr><td><a class="lnk" data-comp="${esc(c)}">${esc(c)}</a></td><td class="n">${money(e)}</td><td class="n">${money(g)}</td><td class="n">${o?money(o):'—'}</td><td class="n"><b>${money(t)}</b></td><td class="n">${ch==null?'—':(ch>0?'+':'')+money(ch)}</td></tr>`; });
+  $('dCompTbl').innerHTML=`<tr><th>Компания</th><th class="n">За оборудование</th><th class="n">Обеспечение</th><th class="n">Прочее</th><th class="n">Итого</th><th class="n">За неделю</th></tr>`+rows+
+    `<tr class="tot"><td>Итого</td><td class="n">${money(T[0])}</td><td class="n">${money(T[1])}</td><td class="n">${T[2]?money(T[2]):'—'}</td><td class="n">${money(T[3])}</td><td class="n">${DD.prevDate?(T[4]>0?'+':'')+money(T[4]):'—'}</td></tr>`;
+  $('dCompTbl').querySelectorAll('a[data-comp]').forEach(a=>a.onclick=()=>{ DS.comps=new Set([a.dataset.comp]); renderDebt(); });
+  // топ должников
+  const m=new Map(); F.forEach(l=>m.set(l.cp,(m.get(l.cp)||0)+l.sk)); const top=[...m].sort((a,b)=>b[1]-a[1]).slice(0,12); const mx=top.length?top[0][1]:1;
+  $('dTop').innerHTML= top.length? top.map(([k,v])=>`<div class="row" data-k="${esc(k)}" title="${esc(k)}: ${money(v)}"><div class="name">${esc(k)}</div><div class="track"><div class="bar" style="width:${Math.max(1,v/mx*100)}%;background:var(--in)"></div></div><div class="val">${short(v)}</div></div>`).join('') : '<div class="empty">Нет долгов</div>';
+  $('dTop').querySelectorAll('.row').forEach(r=>r.onclick=()=>{ DS.q=r.dataset.k.toLowerCase(); $('dQ').value=r.dataset.k; renderDebt(); });
+  // сроки
+  const FA=act.filter(l=>dIn(l,{age:true})); const am=AGES.map(a=>[a,sum(FA.filter(l=>l._age===a[0]))]); const amx=Math.max(1,...am.map(x=>x[1]));
+  $('dAgeBars').innerHTML=am.map(([a,v])=>`<div class="row ${DS.age===a[0]?'sel':''}" data-k="${a[0]}"><div class="name">${a[1]}</div><div class="track"><div class="bar" style="width:${v?Math.max(1,v/amx*100):0}%;background:${a[0]==='365+'||a[0]==='181-365'?'var(--out)':'var(--in)'}"></div></div><div class="val">${v?short(v):'—'}</div></div>`).join('');
+  $('dAgeBars').querySelectorAll('.row').forEach(r=>r.onclick=()=>{ DS.age=DS.age===r.dataset.k?'':r.dataset.k; renderDebt(); });
+  // оплаты по выписке, ещё не отражённые в 1С
+  const BL=DD.lines.filter(l=>l.bank && (!DS.comps.size||DS.comps.has(l.comp)));
+  $('dBankWrap').style.display = BL.length? '' : 'none';
+  if(BL.length){ $('dBankHint').textContent=`${BL.length} поз. на ${money(BL.reduce((a,l)=>a+l.bank.amount,0))} — деньги пришли на счёт, а в 1С (на ${dmy(DD.asOf)}) долг ещё числится. Проверьте и проведите в 1С.`;
+    $('dBankTbl').innerHTML=`<tr><th>Дата оплаты</th><th>Больница</th><th>Компания</th><th>Договор</th><th class="n">Долг по 1С</th><th class="n">Пришло</th><th>Назначение платежа</th></tr>`+
+      BL.sort((a,b)=>b.bank.date.localeCompare(a.bank.date)).map(l=>`<tr><td style="white-space:nowrap">${dmy(l.bank.date)}</td><td>${esc(l.cp)}</td><td>${esc(l.comp)}</td><td class="sub">${esc(l.contract)}</td><td class="n">${money(l.sk)}</td><td class="n" style="color:var(--in)"><b>${money(l.bank.amount)}</b></td><td class="p">${esc(l.bank.purpose)}</td></tr>`).join(''); }
+  // изменения
+  if(DD.prevDate){
+    const ch=DD.lines.filter(l=>l._ch && Math.abs(l._ch)>=1 && (!DS.comps.size||DS.comps.has(l.comp))).sort((a,b)=>a._ch-b._ch);
+    $('dChHint').textContent=`С ${dmy(DD.prevDate)} по ${dmy(DD.asOf)}: погашено/уменьшилось — ${ch.filter(l=>l._ch<0).length}, новое/выросло — ${ch.filter(l=>l._ch>0).length}`;
+    $('dChTbl').innerHTML = ch.length? `<tr><th>Больница</th><th>Компания</th><th>Договор</th><th class="n">Было</th><th class="n">Стало</th><th class="n">Изменение</th></tr>`+
+      ch.map(l=>`<tr><td>${esc(l.cp)}</td><td>${esc(l.comp)}</td><td class="sub">${esc(l.contract)}</td><td class="n">${money(l.prev)}</td><td class="n">${l.sk>0?money(l.sk):'<b>погашено</b>'}</td><td class="n" style="color:${l._ch<0?'var(--in)':'var(--out)'}"><b>${l._ch>0?'+':''}${money(l._ch)}</b></td></tr>`).join('')
+      : '<tr><td class="empty">Изменений нет</td></tr>';
+  } else { $('dChHint').textContent='Появится со следующей недели — когда в папке будет выгрузка за прошлую неделю.'; $('dChTbl').innerHTML=''; }
+  // реестр
+  const {k,d}=DS.sort; const val=l=>k==='sk'?l.sk:k==='ch'?(l._ch||0):k==='d'?(l._d??-1):String(l[k]||'');
+  const A=[...F].sort((a,b)=>{ const x=val(a),y=val(b); return (x>y?1:x<y?-1:0)*d; });
+  $('dHint').textContent=`${A.length} позиций · заголовок — сортировка`+(DEBT.editable?' · ✎ — комментарий, статус, дата образования':'');
+  const H=[['cp','Больница'],['comp','Компания'],['contract','Договор / назначение'],['sk','Долг'],['ch','За неделю'],['d','Дней'],['status','Статус'],['comment','Комментарий']];
+  $('dTbl').innerHTML='<tr>'+H.map(([c,t])=>`<th data-s="${c}" class="${['sk','ch','d'].includes(c)?'n':''}">${t}${k===c?(d>0?' ↑':' ↓'):''}</th>`).join('')+'</tr>'+
+    (A.map(l=>`<tr>
+      <td class="c">${esc(l.cp)}${l.manual?' <span class="tag">вне 1С</span>':''}${l.isNew?' <span class="tag" style="background:var(--warn-bg);color:var(--warn-ink)">новое</span>':''}${l.bank?` <span class="tag" style="background:var(--chip);color:var(--accent)">оплачено по выписке ${dmy(l.bank.date)} — отразить в 1С</span>`:''}${l.equip?`<div class="sub">${esc(l.equip)}</div>`:''}${l.id?`<div class="sub">ID ${esc(l.id)}</div>`:''}</td>
+      <td style="white-space:nowrap">${esc(l.comp)}</td>
+      <td class="p">${esc(l.contract)}<div class="sub">${esc(l.purpose)}${l.acc?' · сч. '+esc(l.acc):''}${l.note&&!l.purpose.toLowerCase().includes(l.note.toLowerCase())&&!/^за оборудование$/i.test(l.note)?' · '+esc(l.note):''}</div></td>
+      <td class="n"><b>${money(l.sk)}</b></td>
+      <td class="n">${l._ch&&Math.abs(l._ch)>=1?`<span style="color:${l._ch<0?'var(--in)':'var(--out)'}">${l._ch>0?'+':''}${money(l._ch)}</span>`:'—'}</td>
+      <td class="n">${l._d==null?'—':l._d}${l.date0?`<div class="sub">с ${dmy(l.date0)}</div>`:''}</td>
+      <td>${esc(l.status||'—')}${DEBT.editable?` <button class="edit" data-key="${esc(l.key)}">✎</button>`:''}</td>
+      <td class="p">${esc(l.comment)}${l.paystatus?`<div style="color:var(--ink)">💬 ${esc(l.paystatus)}</div>`:''}</td></tr>`).join('')||'<tr><td colspan="8" class="empty">Нет позиций по фильтрам</td></tr>');
+  $('dTbl').querySelectorAll('th[data-s]').forEach(th=>th.onclick=()=>{ const c=th.dataset.s; DS.sort=DS.sort.k===c?{k:c,d:-DS.sort.d}:{k:c,d:['sk','ch','d'].includes(c)?-1:1}; renderDebt(); });
+  $('dTbl').querySelectorAll('button.edit').forEach(b=>b.onclick=()=>DEBT.onEdit&&DEBT.onEdit(b.dataset.key));
+  window.__DF=A;
+}
+$('dComps').onclick=e=>{ const b=e.target.closest('.chip'); if(!b) return; const c=b.dataset.c; if(!c) DS.comps.clear(); else DS.comps.has(c)?DS.comps.delete(c):DS.comps.add(c); renderDebt(); };
+$('dQ').oninput=e=>deb(()=>{ DS.q=e.target.value.trim().toLowerCase(); renderDebt(); });
+$('dPurpose').onchange=e=>{ DS.purpose=e.target.value; renderDebt(); };
+$('dStatus').onchange=e=>{ DS.status=e.target.value; renderDebt(); };
+$('dAge').onchange=e=>{ DS.age=e.target.value; renderDebt(); };
+$('dChanged').onchange=e=>{ DS.changed=e.target.checked; renderDebt(); };
+$('dReset').onclick=()=>{ DS.comps.clear(); DS.q=DS.purpose=DS.status=DS.age=''; DS.changed=false; $('dQ').value=''; renderDebt(); };
+$('dCsv').onclick=()=>{ const q=s=>'"'+String(s??'').replace(/"/g,'""')+'"';
+  const rows=[['Больница','Компания','Договор','Назначение','Счёт','Долг','Изменение за неделю','Дата образования','Дней','Статус','Комментарий','Статус оплаты','Оборудование','ID'].map(q).join(';')];
+  (window.__DF||[]).forEach(l=>rows.push([l.cp,l.comp,l.contract,l.purpose,l.acc,String(l.sk).replace('.',','),l._ch==null?'':String(l._ch).replace('.',','),l.date0?dmy(l.date0):'',l._d??'',l.status,l.comment,l.paystatus,l.equip,l.id].map(q).join(';')));
+  downloadBlob(new Blob(['﻿'+rows.join('\r\n')],{type:'text/csv;charset=utf-8'}),`Долги_больниц_${DD.asOf}.csv`); };
+$('viewTabs').onclick=e=>{ const b=e.target.closest('button'); if(!b) return; showDebtMode(b.dataset.v==='debt'); };
+
+const openData=d=>{ if(d&&d.kind==='all'){ $('viewTabs').classList.remove('apponly'); $('viewTabs').style.display=''; setData(d.dds); if(d.debt) setDebtData(d.debt); else $('viewTabs').style.display='none'; showDebtMode(false); }
+  else if(d&&d.kind==='debt'){ showDebtMode(true); setDebtData(d); } else setData(d); };
 /* режим «снимок для руководства» */
 const SNAP = JSON.parse($('snapdata').textContent);
 const SNAPENC = JSON.parse($('snapenc').textContent);
-if(SNAP){ document.body.classList.add('snap'); setData(SNAP); }
+if(SNAP){ document.body.classList.add('snap'); openData(SNAP); }
 else if(SNAPENC){
   document.body.classList.add('snap'); $('dash').style.display='none'; $('lock').style.display=''; $('lockPass').focus();
   const tryOpen=async()=>{ const pw=$('lockPass').value; if(!pw) return; $('lockErr').innerHTML='<span class="spin"></span>Открываю…'; $('lockBtn').disabled=true;
@@ -646,14 +818,14 @@ else if(SNAPENC){
     let txt=null; try{ txt=await DDSCrypto.decrypt(SNAPENC,pw); }catch(e){}
     $('lockBtn').disabled=false;
     if(txt==null){ $('lockErr').textContent='Неверный пароль'; return; }
-    $('lock').style.display='none'; setData(JSON.parse(txt)); };
+    $('lock').style.display='none'; openData(JSON.parse(txt)); };
   $('lockBtn').onclick=tryOpen; $('lockPass').onkeydown=e=>{ if(e.key==='Enter') tryOpen(); };
 }
 const SNAPREMOTE = JSON.parse($('snapremote').textContent);
 if(SNAPREMOTE){
   document.body.classList.add('snap'); $('dash').style.display='none'; $('lockRememberWrap').style.display='flex';
   let pw=null, lastMac=null;
-  try{ pw=localStorage.getItem('dds-site-pw'); }catch(e){}
+  const PWK='dds-site-pw:'+location.pathname; try{ pw=localStorage.getItem(PWK); }catch(e){}
   const fetchEnc=async()=>{ const r=await fetch(SNAPREMOTE.url+'?t='+Date.now(),{cache:'no-store'}); if(!r.ok) throw new Error('нет связи ('+r.status+')'); return r.json(); };
   const showLock=msg=>{ $('lock').style.display=''; $('lockErr').textContent=msg||''; };
   const refresh=async(password,interactive)=>{
@@ -661,14 +833,14 @@ if(SNAPREMOTE){
     if(enc.mac===lastMac) return true;
     const txt=await DDSCrypto.decrypt(enc,password);
     if(txt==null) return null;
-    lastMac=enc.mac; setData(JSON.parse(txt)); $('lock').style.display='none'; return true;
+    lastMac=enc.mac; openData(JSON.parse(txt)); $('lock').style.display='none'; return true;
   };
   const unlock=async()=>{ const p=$('lockPass').value; if(!p) return; $('lockErr').innerHTML='<span class="spin"></span>Открываю…'; $('lockBtn').disabled=true;
     const ok=await refresh(p,true); $('lockBtn').disabled=false;
     if(ok===null){ $('lockErr').textContent='Неверный пароль'; return; }
-    if(ok){ pw=p; try{ if($('lockRemember').checked) localStorage.setItem('dds-site-pw',p); else localStorage.removeItem('dds-site-pw'); }catch(e){} } };
+    if(ok){ pw=p; try{ if($('lockRemember').checked) localStorage.setItem(PWK,p); else localStorage.removeItem(PWK); }catch(e){} } };
   $('lockBtn').onclick=unlock; $('lockPass').onkeydown=e=>{ if(e.key==='Enter') unlock(); };
-  (async()=>{ if(pw){ $('lock').style.display=''; $('lockErr').innerHTML='<span class="spin"></span>Загружаю…'; const ok=await refresh(pw,true); if(ok===null){ pw=null; try{localStorage.removeItem('dds-site-pw');}catch(e){} showLock('Пароль изменился — введите новый'); } else if(!ok){} }
+  (async()=>{ if(pw){ $('lock').style.display=''; $('lockErr').innerHTML='<span class="spin"></span>Загружаю…'; const ok=await refresh(pw,true); if(ok===null){ pw=null; try{localStorage.removeItem(PWK);}catch(e){} showLock('Пароль изменился — введите новый'); } else if(!ok){} }
     else showLock(''); })();
   const tick=()=>{ if(pw && document.visibilityState==='visible') refresh(pw,false); };
   setInterval(tick,3*60*1000); document.addEventListener('visibilitychange',tick);
