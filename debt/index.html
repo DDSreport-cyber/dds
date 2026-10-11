@@ -121,6 +121,7 @@ dialog input[type=checkbox]{width:auto;margin:0}
 #dTbl td.p{min-width:200px;max-width:300px}
 #dTbl td:last-child{min-width:240px}
 #dTbl .sub{font-size:12px}
+.edit.pen{border:1px solid var(--line);border-radius:6px;padding:2px 8px;margin-bottom:4px;font-size:12px;color:var(--accent);background:var(--surface)}
 @media print{.appbar,.edit{display:none!important}}
 </style>
 </head>
@@ -357,6 +358,8 @@ dialog input[type=checkbox]{width:auto;margin:0}
     <label>Пароль для руководителя (не короче 12 символов)</label><input id="ghPass" type="password" autocomplete="new-password">
     <label>Пароль для отчёта «Долги больниц» (второй руководитель)</label><input id="ghPass2" type="password" autocomplete="new-password">
     <label>Пароль для общей ссылки «Все отчёты»</label><input id="ghPass3" type="password" autocomplete="new-password">
+    <label>Правки Аяна на сайте: закрытое хранилище GitHub</label><input id="ghNotesRepo" placeholder="dds-notes" autocomplete="off" spellcheck="false">
+    <label>Ключ только к этому хранилищу (Contents: Read and write)</label><input id="ghNotesToken" type="password" placeholder="github_pat_..." autocomplete="off">
     <label class="tog" style="margin-top:10px"><input type="checkbox" id="ghOn" checked> Обновлять сайт автоматически</label>
     <div id="ghMsg" style="font-size:13px;margin-top:12px;color:var(--ink-2)"></div>
     <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px;flex-wrap:wrap">
@@ -798,7 +801,62 @@ function setDebtData(data){
   const St=[...new Set(DD.lines.map(l=>l.status||'—'))].sort(); $('dStatus').innerHTML='<option value="">Все статусы</option>'+St.map(p=>`<option>${esc(p)}</option>`).join('');
   $('dAge').innerHTML='<option value="">Любой срок</option>'+AGES.map(a=>`<option value="${a[0]}">${a[1]}</option>`).join('');
   $('sub').textContent=debtSub(); renderDebt();
+  if(DD.edit && !APP.editable){ DEBT.onEdit=siteEdit; siteEditInit(); }
 }
+
+/* ---------- правки Аяна прямо на сайте → закрытое хранилище GitHub (comments.json) ---------- */
+const NOTES={who:'Балмуханов Аян'};
+const u8b64=u=>{ let s=''; for(let i=0;i<u.length;i+=32768) s+=String.fromCharCode.apply(null,u.subarray(i,i+32768)); return btoa(s); };
+const b64u8=s=>Uint8Array.from(atob(s.replace(/\s/g,'')),c=>c.charCodeAt(0));
+async function notesGet(ed){
+  const r=await fetch(`https://api.github.com/repos/${ed.owner}/${ed.repo}/contents/comments.json?t=${Date.now()}`,{cache:'no-store',headers:{'Authorization':'Bearer '+ed.token,'Accept':'application/vnd.github+json'}});
+  if(r.status===404) return {data:{},sha:null};
+  if(!r.ok) throw new Error(r.status===401?'ключ для комментариев не принят':'GitHub '+r.status);
+  const j=await r.json(); return {data:JSON.parse(new TextDecoder().decode(b64u8(j.content))||'{}'),sha:j.sha};
+}
+async function notesPut(ed,data,sha){
+  const r=await fetch(`https://api.github.com/repos/${ed.owner}/${ed.repo}/contents/comments.json`,{method:'PUT',cache:'no-store',headers:{'Authorization':'Bearer '+ed.token,'Accept':'application/vnd.github+json','Content-Type':'application/json'},
+    body:JSON.stringify({message:'Комментарий: '+NOTES.who,content:u8b64(new TextEncoder().encode(JSON.stringify(data,null,1))),...(sha?{sha}:{})})});
+  return r;
+}
+async function notesSave(ed,key,fields){
+  const now=new Date().toISOString();
+  for(let attempt=0;attempt<3;attempt++){
+    const {data,sha}=await notesGet(ed);
+    const e=data[key]||(data[key]={}); e._t=e._t||{};
+    for(const k in fields){ e[k]=fields[k]; e._t[k]=now; }
+    const r=await notesPut(ed,data,sha);
+    if(r.ok) return true;
+    if(r.status!==409 && r.status!==422) throw new Error('GitHub '+r.status);
+  }
+  throw new Error('не удалось сохранить, попробуйте ещё раз');
+}
+function notesOverlay(data,notes){ // применяем правки, сделанные после выгрузки данных
+  data.lines.forEach(l=>{ const n=notes[l.key]; if(!n||!n._t) return;
+    for(const k of ['status','paystatus']) if(n._t[k] && n._t[k]>(data.genISO||'')) l[k]=n[k]; });
+}
+async function siteEditInit(){
+  if(!DD||!DD.edit||APP.editable) return;
+  DEBT.editable=true;
+  try{ const {data}=await notesGet(DD.edit); notesOverlay(DD,data); }catch(e){}
+  renderDebt();
+}
+function siteEdit(key){
+  const l=DD.lines.find(x=>x.key===key); if(!l) return;
+  $('dDlgInfo').textContent=`${l.comp} · ${l.cp} · ${l.contract} · ${money(l.sk)}`;
+  ['dEquip','dId','dDate0','dCom'].forEach(id=>{ $(id).disabled=true; });
+  $('dEquip').value=l.equip||''; $('dId').value=l.id||''; $('dDate0').value=l.date0||''; $('dCom').value=l.comment||'';
+  $('dSt').value=l.status||''; $('dPay').value=l.paystatus||'';
+  const dlg=$('dDlg'); dlg.returnValue=''; dlg.showModal();
+  dlg.onclose=async()=>{ if(dlg.returnValue!=='ok') return;
+    const f={status:$('dSt').value.trim(),paystatus:$('dPay').value.trim()};
+    const old={status:l.status,paystatus:l.paystatus}; Object.assign(l,f); renderDebt();
+    try{ await notesSave(DD.edit,key,f); toast('✓ Сохранено — бухгалтер увидит это в программе'); }
+    catch(e){ Object.assign(l,old); renderDebt(); toast('Не сохранилось: '+e.message,true); } };
+}
+function toast(t,bad){ let el=$('toast'); if(!el){ el=document.createElement('div'); el.id='toast'; document.body.appendChild(el); }
+  el.textContent=t; el.style.cssText=`position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:${bad?'var(--out)':'var(--ink)'};color:var(--surface);padding:10px 16px;border-radius:10px;font-size:14px;z-index:99;max-width:90vw`;
+  clearTimeout(el._t); el._t=setTimeout(()=>el.remove(),4000); }
 function dIn(l,ign={}){
   if(DS.comps.size && !DS.comps.has(l.comp)) return false;
   if(!ign.purpose && DS.purpose && l.purpose!==DS.purpose) return false;
@@ -861,7 +919,7 @@ function renderDebt(){
   const H=[['cp','Больница'],['comp','Компания'],['contract','Договор / назначение'],['sk','Долг'],['ch','За неделю'],['d','Дней'],['comment','Комментарий бухгалтера'],['status','Балмуханов Аян: статус и действия']];
   $('dTbl').innerHTML='<tr>'+H.map(([c,t])=>`<th data-s="${c}" class="${['sk','ch','d'].includes(c)?'n':''}">${t}${k===c?(d>0?' ↑':' ↓'):''}</th>`).join('')+'</tr>'+
     (A.map(l=>`<tr>
-      <td class="c">${esc(l.cp)}${l.manual?' <span class="tag">вне 1С</span>':''}${l.isNew?' <span class="tag" style="background:var(--warn-bg);color:var(--warn-ink)">новое</span>':''}${l.bank?` <span class="tag" style="background:var(--chip);color:var(--accent)">оплачено по выписке ${dmy(l.bank.date)} — отразить в 1С</span>`:''}${l.equip?`<div class="sub">${esc(l.equip)}</div>`:''}${l.id?`<div class="sub">ID ${esc(l.id)}</div>`:''}</td>
+      <td class="c">${DEBT.editable?`<button class="edit pen" data-key="${esc(l.key)}" title="Комментарий, статус, дата">✎ Править</button><br>`:''}${esc(l.cp)}${l.manual?' <span class="tag">вне 1С</span>':''}${l.isNew?' <span class="tag" style="background:var(--warn-bg);color:var(--warn-ink)">новое</span>':''}${l.bank?` <span class="tag" style="background:var(--chip);color:var(--accent)">оплачено по выписке ${dmy(l.bank.date)} — отразить в 1С</span>`:''}${l.equip?`<div class="sub">${esc(l.equip)}</div>`:''}${l.id?`<div class="sub">ID ${esc(l.id)}</div>`:''}</td>
       <td style="white-space:nowrap">${esc(l.comp)}</td>
       <td class="p">${esc(l.contract)}<div class="sub">${esc(l.purpose)}${l.acc?' · сч. '+esc(l.acc):''}${l.note&&!l.purpose.toLowerCase().includes(l.note.toLowerCase())&&!/^за оборудование$/i.test(l.note)?' · '+esc(l.note):''}</div></td>
       <td class="n"><b>${money(l.sk)}</b></td>
