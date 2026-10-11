@@ -293,9 +293,9 @@ dialog input[type=checkbox]{width:auto;margin:0}
     <label>Оборудование</label><input id="dEquip">
     <label>ID</label><input id="dId">
     <label>Дата образования долга</label><input id="dDate0" type="date">
-    <label>Статус (финансист)</label><input id="dSt" list="dStList"><datalist id="dStList"><option>Не закрыто</option><option>Закрыто</option><option>Сделать операцию за штраф</option><option>Суд</option></datalist>
+    <label>Статус (Балмуханов Аян)</label><input id="dSt" list="dStList"><datalist id="dStList"><option>Не закрыто</option><option>Закрыто</option><option>Сделать операцию за штраф</option><option>Суд</option></datalist>
     <label>Комментарий бухгалтера (что за долг, за что)</label><input id="dCom">
-    <label>Действия финансиста</label><input id="dPay">
+    <label>Действия (Балмуханов Аян)</label><input id="dPay">
     <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px">
       <button class="btn" value="cancel">Отмена</button><button class="btn primary" value="ok">Сохранить</button>
     </div>
@@ -752,7 +752,7 @@ const serial = iso => (Date.UTC(+iso.slice(0,4),+iso.slice(5,7)-1,+iso.slice(8,1
 
 /* реестр долгов в Excel: жёлтые колонки — для заполнения, скрытая колонка «Ключ» — для обратной загрузки */
 const DEBT_COLS=[['key','Ключ'],['id','ID'],['cp','Больница'],['comp','Компания'],['contract','Договор'],['purpose','Назначение'],['acc','Счёт'],['sk','Долг по 1С'],['ch','Изм. за неделю'],
-  ['date0','Дата образования'],['equip','Оборудование'],['comment','Комментарий бухгалтера (что за долг, за что)'],['status','Статус'],['paystatus','Действия финансиста']];
+  ['date0','Дата образования'],['equip','Оборудование'],['comment','Комментарий бухгалтера (что за долг, за что)'],['status','Статус'],['paystatus','Действия (Балмуханов Аян)']];
 const DEBT_EDIT=new Set(['id','date0','equip','comment','status','paystatus']);
 function debtExcel(dd){
   const act=dd.lines.filter(l=>l.sk>0).sort((a,b)=>(a.comp+a.cp).localeCompare(b.comp+b.cp)||b.sk-a.sk);
@@ -768,7 +768,7 @@ function debtExcel(dd){
   reg.filter=`A1:N${n}`; reg.dv=[{sqref:`M2:M${n}`,list:'"Не закрыто,Закрыто,Сделать операцию за штраф,Суд"'}];
   const meta={name:'_meta',hiddenSheet:true,rows:[['exportedAt',dd.genISO||new Date().toISOString()],['asOf',dd.asOf||'']]};
   const help={name:'Как заполнять',widths:[110],rows:[[{v:'Заполняйте только ЖЁЛТЫЕ колонки. Остальное берётся из 1С автоматически.',s:1}],
-    ['Бухгалтер — «Комментарий бухгалтера»: что за долг и за что. Финансист — «Статус» (выбор из списка) и «Действия финансиста».'],
+    ['Бухгалтер — «Комментарий бухгалтера»: что за долг и за что. Балмуханов Аян — «Статус» (выбор из списка) и «Действия (Балмуханов Аян)».'],
     ['Строки не удаляйте и не меняйте порядок колонок. Сохраните файл и передайте бухгалтеру.'],
     ['Бухгалтер кладёт файл в папку 5_Комментарии и нажимает «Обновить» — комментарии попадут в отчёт и на сайт.']]};
   return writeXlsx([reg,help,meta]);
@@ -858,7 +858,7 @@ function renderDebt(){
   const {k,d}=DS.sort; const val=l=>k==='sk'?l.sk:k==='ch'?(l._ch||0):k==='d'?(l._d??-1):String(l[k]||'');
   const A=[...F].sort((a,b)=>{ const x=val(a),y=val(b); return (x>y?1:x<y?-1:0)*d; });
   $('dHint').textContent=`${A.length} позиций · заголовок — сортировка`+(DEBT.editable?' · ✎ — комментарий, статус, дата образования':'');
-  const H=[['cp','Больница'],['comp','Компания'],['contract','Договор / назначение'],['sk','Долг'],['ch','За неделю'],['d','Дней'],['comment','Комментарий бухгалтера'],['status','Финансист: статус и действия']];
+  const H=[['cp','Больница'],['comp','Компания'],['contract','Договор / назначение'],['sk','Долг'],['ch','За неделю'],['d','Дней'],['comment','Комментарий бухгалтера'],['status','Балмуханов Аян: статус и действия']];
   $('dTbl').innerHTML='<tr>'+H.map(([c,t])=>`<th data-s="${c}" class="${['sk','ch','d'].includes(c)?'n':''}">${t}${k===c?(d>0?' ↑':' ↓'):''}</th>`).join('')+'</tr>'+
     (A.map(l=>`<tr>
       <td class="c">${esc(l.cp)}${l.manual?' <span class="tag">вне 1С</span>':''}${l.isNew?' <span class="tag" style="background:var(--warn-bg);color:var(--warn-ink)">новое</span>':''}${l.bank?` <span class="tag" style="background:var(--chip);color:var(--accent)">оплачено по выписке ${dmy(l.bank.date)} — отразить в 1С</span>`:''}${l.equip?`<div class="sub">${esc(l.equip)}</div>`:''}${l.id?`<div class="sub">ID ${esc(l.id)}</div>`:''}</td>
@@ -881,7 +881,7 @@ $('dAge').onchange=e=>{ DS.age=e.target.value; renderDebt(); };
 $('dChanged').onchange=e=>{ DS.changed=e.target.checked; renderDebt(); };
 $('dReset').onclick=()=>{ DS.comps.clear(); DS.q=DS.purpose=DS.status=DS.age=''; DS.changed=false; $('dQ').value=''; renderDebt(); };
 $('dCsv').onclick=()=>{ const q=s=>'"'+String(s??'').replace(/"/g,'""')+'"';
-  const rows=[['Больница','Компания','Договор','Назначение','Счёт','Долг','Изменение за неделю','Дата образования','Дней','Статус','Комментарий','Статус оплаты','Оборудование','ID'].map(q).join(';')];
+  const rows=[['Больница','Компания','Договор','Назначение','Счёт','Долг','Изменение за неделю','Дата образования','Дней','Статус','Комментарий','Действия (Балмуханов Аян)','Оборудование','ID'].map(q).join(';')];
   (window.__DF||[]).forEach(l=>rows.push([l.cp,l.comp,l.contract,l.purpose,l.acc,String(l.sk).replace('.',','),l._ch==null?'':String(l._ch).replace('.',','),l.date0?dmy(l.date0):'',l._d??'',l.status,l.comment,l.paystatus,l.equip,l.id].map(q).join(';')));
   downloadBlob(new Blob(['﻿'+rows.join('\r\n')],{type:'text/csv;charset=utf-8'}),`Долги_больниц_${DD.asOf}.csv`); };
 $('dXlsx').onclick=()=>{ if(DD) downloadBlob(debtExcel(DD),`Долги_больниц_${DD.asOf}.xlsx`); };
