@@ -440,10 +440,15 @@ function depPrep(){
 }
 function depBal(c,cur,day){ const d=depBy[c+'|'+cur]; if(!d) return 0; let b=d.init; d.list.forEach(o=>{ if(o.date<day) b+= o.dep==='place'?o.amount:-o.amount; }); return Math.max(0,Math.round(b*100)/100); }
 function compBal(c,cur,day){ const ii=accs.filter(a=>a.company===c&&a.cur===cur).map(a=>a.iik); const vals=ii.map(i=>opening(i,day));
+  if(!vals.length || vals.every(x=>x===null)) return {v:null, dep:0, unknown:true, none:true};
   const dep=depBal(c,cur,day); return {v:vals.reduce((s,x)=>s+(x||0),0)+dep, dep, unknown:vals.some(x=>x===null)}; }
+const mny = v => v==null? '—' : money(v);
 
 function opening(iik, day){
   const an = anchorsBy[iik]||[], li = opsBy[iik]||[];
+  // до первой выписки по счёту данных нет — ничего не придумываем
+  const first = Math.min(...an.map(a=>+a.date.replace(/-/g,'')), ...li.map(o=>+o.date.replace(/-/g,'')));
+  if(!isFinite(first) || +day.replace(/-/g,'') < first) return null;
   let before=null, after=null;
   an.forEach(a=>{ if(a.date<=day){ if(!before||a.date>before.date) before=a; } else { if(!after||a.date<after.date) after=a; } });
   const net = o => o.dir==='in'? o.amount : -o.amount;
@@ -504,7 +509,7 @@ function render(){
   const sOut = F.filter(o=>o.dir==='out').reduce((s,o)=>s+kzt(o),0);
 
   const comps = D.order.filter(c=>!S.comps.size||S.comps.has(c));
-  let rows='', tO=0,tI=0,tX=0,tC=0, unknown=false;
+  let rows='', tO=0,tI=0,tX=0,tC=0, unknown=false, known=0;
   const nextDay = addDays(S.to,1);
   comps.forEach(c=>{
     const curs=[...new Set(accs.filter(a=>a.company===c).map(a=>a.cur))].sort((a,b)=>a==='KZT'?-1:b==='KZT'?1:a.localeCompare(b));
@@ -513,10 +518,11 @@ function render(){
       const OB=compBal(c,cur,S.from), CB=compBal(c,cur,nextDay);
       if(OB.unknown||CB.unknown) unknown=true;
       const o=OB.v, cz=CB.v;
+      if(OB.none && CB.none){ rows += `<tr><td><a class="lnk" data-comp="${esc(c)}">${esc(c)}</a>${cur!=='KZT'?` <span class="tag">${cur}</span>`:''}</td><td colspan="4" class="sub" style="text-align:right">нет выписки за этот период</td></tr>`; return; }
       const per = ops.filter(x=>ii.includes(x.iik)&&x.date>=S.from&&x.date<=S.to&&!hidden(x));
       const i_=per.filter(x=>x.dir==='in').reduce((s,x)=>s+x.amount,0), x_=per.filter(x=>x.dir==='out').reduce((s,x)=>s+x.amount,0);
-      if(cur==='KZT'){ tO+=o; tI+=i_; tX+=x_; tC+=cz; }
-      rows += `<tr><td><a class="lnk" data-comp="${esc(c)}">${esc(c)}</a>${cur!=='KZT'?` <span class="tag">${cur}</span>`:''}${CB.dep>0?` <span class="tag" title="Остаток включает деньги на депозите">в т.ч. депозит ${money(CB.dep)}</span>`:''}</td><td class="n">${money(o)}</td><td class="n">${i_?money(i_):'—'}</td><td class="n">${x_?money(x_):'—'}</td><td class="n"><b>${money(cz)}</b></td></tr>`;
+      known++; if(cur==='KZT'){ tO+=o||0; tI+=i_; tX+=x_; tC+=cz||0; }
+      rows += `<tr><td><a class="lnk" data-comp="${esc(c)}">${esc(c)}</a>${cur!=='KZT'?` <span class="tag">${cur}</span>`:''}${CB.dep>0?` <span class="tag" title="Остаток включает деньги на депозите">в т.ч. депозит ${money(CB.dep)}</span>`:''}</td><td class="n">${mny(o)}</td><td class="n">${i_?money(i_):'—'}</td><td class="n">${x_?money(x_):'—'}</td><td class="n"><b>${mny(cz)}</b></td></tr>`;
     });
   });
   $('balTbl').innerHTML = `<tr><th>Компания</th><th class="n">На ${dmy(S.from)}</th><th class="n">Приход</th><th class="n">Расход</th><th class="n">На конец ${dmy(S.to)}</th></tr>`+
@@ -525,8 +531,8 @@ function render(){
   $('balTbl').querySelectorAll('a[data-comp]').forEach(a=>a.onclick=()=>{ S.comps=new Set([a.dataset.comp]); render(); });
 
   const filtered = S.cp||S.art||S.id||S.q;
-  $('kOpen').textContent = money(tO); $('kOpenS').textContent = `на начало ${dmy(S.from)}, KZT`;
-  $('kClose').textContent = money(tC); $('kCloseS').textContent = `на конец ${dmy(S.to)}`+(unknown?' · нет выписки для части счетов':'');
+  $('kOpen').textContent = known? money(tO) : '—'; $('kOpenS').textContent = `на начало ${dmy(S.from)}, KZT`;
+  $('kClose').textContent = known? money(tC) : '—'; $('kCloseS').textContent = `на конец ${dmy(S.to)}`+(!known?' · нет выписок за этот период':unknown?' · нет выписки для части счетов':'');
   const curN = F.filter(o=>(o.cur||'KZT')!=='KZT').length;
   $('kIn').textContent = money(sIn); $('kInS').textContent = `${F.filter(o=>o.dir==='in'&&(o.cur||'KZT')==='KZT').length} операций, KZT`+(curN?` · валютных: ${curN} — в таблице`:'')+(filtered?' · с учётом фильтров':'')+(S.hideInt?' · без внутр. переводов':'');
   $('kOut').textContent = money(sOut); $('kOutS').textContent = `${F.filter(o=>o.dir==='out'&&(o.cur||'KZT')==='KZT').length} операций · чистый поток ${sIn-sOut>=0?'+':''}${short(sIn-sOut)}`;
@@ -576,17 +582,18 @@ function ddsView(comps){
     const ii=accs.filter(a=>a.company===c&&a.cur===cur).map(a=>a.iik);
     const OB=compBal(c,cur,S.from), CB=compBal(c,cur,nextDay);
     const list=ops.filter(o=>ii.includes(o.iik)&&o.date>=S.from&&o.date<=S.to&&!hidden(o)).sort((a,b)=>(multi?a.date.localeCompare(b.date):0)||(a.dir!=='in')-(b.dir!=='in')||(a.time||'').localeCompare(b.time||''));
+    if(OB.none && CB.none && !list.length){ blocks.push(`<div class="ddsb" style="padding:12px 14px"><b>${esc(c+(cur!=='KZT'?' '+cur:''))}</b> <span class="sub">— нет выписки за ${S.from===S.to?'эту дату':'этот период'}</span></div>`); return; }
     if(!list.length && !OB.v && !CB.v) return;
     const sIn=list.filter(o=>o.dir==='in').reduce((s,o)=>s+o.amount,0), sOut=list.filter(o=>o.dir==='out').reduce((s,o)=>s+o.amount,0);
     const cn=multi?6:5, nm=c+(cur!=='KZT'?' '+cur:'');
     const rows=list.map((o,n)=>`<tr><td class="sub">${n+1}</td>${multi?`<td style="white-space:nowrap">${dmy(o.date)}</td>`:''}<td class="c">${esc(o.cp)}</td><td class="n" style="color:var(--in)">${o.dir==='in'?money(o.amount):''}</td><td class="n">${o.dir==='out'?money(o.amount):''}</td><td class="p">${esc(o.purpose)}${o.note?`<div style="color:var(--ink)">💬 ${esc(o.note)}</div>`:''}</td><td>${esc(o.id||'')}</td></tr>`).join('');
     blocks.push(`<div class="scroll ddsb"><table class="ops" style="table-layout:fixed;width:100%;min-width:720px">
       <colgroup><col style="width:36px">${multi?'<col style="width:96px">':''}<col style="width:26%"><col style="width:140px"><col style="width:140px"><col><col style="width:90px"></colgroup>
-      <tr class="hd"><td colspan="${cn-3}"><b>${esc(nm)}</b> остаток на начало ${dmy(S.from)}</td><td class="n"><b>${money(OB.v)}</b></td><td colspan="4" class="sub">${OB.dep>0?'в т.ч. на депозите '+money(OB.dep):''}${OB.unknown?' · нет выписки для части счетов':''}</td></tr>
+      <tr class="hd"><td colspan="${cn-3}"><b>${esc(nm)}</b> остаток на начало ${dmy(S.from)}</td><td class="n"><b>${mny(OB.v)}</b></td><td colspan="4" class="sub">${OB.dep>0?'в т.ч. на депозите '+money(OB.dep):''}${OB.unknown?' · нет выписки для части счетов':''}</td></tr>
       <tr><th>№</th>${multi?'<th>Дата</th>':''}<th>Контрагент</th><th class="n">Приход</th><th class="n">Расход</th><th>Содержание</th><th>ID</th></tr>
       ${rows||`<tr><td colspan="${cn+2}" class="empty">Движений нет</td></tr>`}
       <tr class="tot"><td></td>${multi?'<td></td>':''}<td>Оборот</td><td class="n">${money(sIn)}</td><td class="n">${money(sOut)}</td><td colspan="2"></td></tr>
-      <tr class="tot"><td></td>${multi?'<td></td>':''}<td>Итого остаток на конец</td><td class="n">${money(CB.v)}</td><td colspan="3" class="sub">${CB.dep>0?'в т.ч. на депозите '+money(CB.dep):''}</td></tr></table></div>`); }); });
+      <tr class="tot"><td></td>${multi?'<td></td>':''}<td>Итого остаток на конец</td><td class="n">${mny(CB.v)}</td><td colspan="3" class="sub">${CB.dep>0?'в т.ч. на депозите '+money(CB.dep):''}</td></tr></table></div>`); }); });
   $('stmt').innerHTML = blocks.join('') || '<div class="empty">Нет данных за выбранный период</div>';
   $('stmtHint').textContent = 'Как в ежедневном отчёте: депозиты и переводы между своими счетами не показываются, деньги на депозите входят в остаток. Проценты банка — в приходе.';
 }
@@ -684,8 +691,23 @@ function buildMessage(kind, day, comps){
     let t=0;
     comps.forEach(c=>{ [...new Set(accs.filter(a=>a.company===c).map(a=>a.cur))].sort((a,b)=>a==='KZT'?-1:b==='KZT'?1:a.localeCompare(b)).forEach(cur=>{
       const v=compBal(c,cur,md).v;
-      if(cur==='KZT') t+=v; lines.push(pad(c+(cur!=='KZT'?' '+cur:''),w)+money(v)); }); });
+      if(cur==='KZT') t+=v||0; lines.push(pad(c+(cur!=='KZT'?' '+cur:''),w)+(v==null?'нет выписки':money(v))); }); });
     lines.push(pad('Итого',w)+money(t));
+    // общее за выбранный период — как таблица «Остатки по компаниям»
+    const f0 = (S.from && S.from<=day) ? S.from : day, nd=addDays(day,1);
+    lines.push('', f0===day? `ОБЩЕЕ ЗА ${dmy(day)}` : `ОБЩЕЕ ЗА ${dmy(f0)} – ${dmy(day)}`);
+    const T={o:0,i:0,x:0,c:0};
+    comps.forEach(c=>{ [...new Set(accs.filter(a=>a.company===c).map(a=>a.cur))].sort((a,b)=>a==='KZT'?-1:b==='KZT'?1:a.localeCompare(b)).forEach(cur=>{
+      const ii=accs.filter(a=>a.company===c&&a.cur===cur).map(a=>a.iik);
+      const OB=compBal(c,cur,f0), CB=compBal(c,cur,nd);
+      const per=ops.filter(o=>ii.includes(o.iik)&&o.date>=f0&&o.date<=day&&!hidden(o));
+      const i_=per.filter(o=>o.dir==='in').reduce((s,o)=>s+o.amount,0), x_=per.filter(o=>o.dir==='out').reduce((s,o)=>s+o.amount,0);
+      const nm=c+(cur!=='KZT'?' '+cur:'');
+      if(OB.none && CB.none && !per.length){ lines.push(`${nm}: нет выписки`); return; }
+      if(cur==='KZT'){ T.o+=OB.v||0; T.i+=i_; T.x+=x_; T.c+=CB.v||0; }
+      lines.push(nm, `   на начало ${mny(OB.v)}`, `   приход ${i_?money(i_):'—'} | расход ${x_?money(x_):'—'}`, `   на конец ${mny(CB.v)}`+(CB.dep>0?` (в т.ч. депозит ${money(CB.dep)})`:''));
+    }); });
+    lines.push('', `ИТОГО, KZT:`, `   на начало ${money(T.o)}`, `   приход ${money(T.i)} | расход ${money(T.x)}`, `   на конец ${money(T.c)}`);
   } else {
     const nd=addDays(day,1);
     lines.push(`Добрый вечер. Итоги дня ${dmy(day)}`,'');
@@ -695,8 +717,9 @@ function buildMessage(kind, day, comps){
       const dd=ops.filter(o=>ii.includes(o.iik)&&o.date===day&&!hidden(o));
       const i_=dd.filter(o=>o.dir==='in').reduce((s,o)=>s+o.amount,0), o_=dd.filter(o=>o.dir==='out').reduce((s,o)=>s+o.amount,0);
       const cl=compBal(c,cur,nd).v;
-      if(cur==='KZT'){ti+=i_;to+=o_;tc+=cl;}
-      lines.push(`${c}${cur!=='KZT'?' '+cur:''}`, `   приход ${money(i_)} | расход ${money(o_)}`, `   остаток на конец: ${money(cl)}`); }); });
+      if(cl==null && !dd.length){ lines.push(`${c}${cur!=='KZT'?' '+cur:''}: нет выписки`); return; }
+      if(cur==='KZT'){ti+=i_;to+=o_;tc+=cl||0;}
+      lines.push(`${c}${cur!=='KZT'?' '+cur:''}`, `   приход ${money(i_)} | расход ${money(o_)}`, `   остаток на конец: ${mny(cl)}`); }); });
     lines.push('',`ИТОГО: приход ${money(ti)} | расход ${money(to)} | остаток ${money(tc)}`);
     const big=ops.filter(o=>o.date===day&&o.dir==='out'&&!o.link&&comps.includes(o.company)).sort((a,b)=>kzt(b)-kzt(a)).slice(0,5);
     if(big.length){ lines.push('','Крупные платежи:'); big.forEach(o=>lines.push(`• ${o.company} → ${o.cp}: ${money(o.amount)} ${o.cur} (${o.art})`)); }
