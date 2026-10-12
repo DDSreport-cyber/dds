@@ -73,6 +73,11 @@ th{font-weight:600;color:var(--ink-2);font-size:12px;text-align:left;padding:7px
 td{padding:7px 8px;border-bottom:1px solid var(--line);vertical-align:top}
 td.n,th.n{text-align:right;white-space:nowrap}
 tr.tot td{font-weight:650;border-bottom:0}
+details.stmt{border:1px solid var(--line);border-radius:10px;margin-top:10px;padding:0 12px}
+details.stmt>summary{cursor:pointer;padding:10px 0;list-style-position:inside}
+details.stmt[open]>summary{border-bottom:1px solid var(--line);margin-bottom:4px}
+details.stmt tr.tot td{background:var(--surface-2)}
+details.stmt tr.int td{color:var(--ink-2)}
 .scroll{overflow-x:auto}
 .bars .row{display:grid;grid-template-columns:minmax(0,38%) minmax(0,1fr) auto;gap:10px;align-items:center;padding:5px 4px;border-radius:6px;cursor:pointer}
 .bars .row:hover{background:var(--surface-2)}
@@ -208,6 +213,14 @@ dialog input[type=checkbox]{width:auto;margin:0}
       <h2>Остатки по компаниям</h2>
       <div class="hint">По выпискам банка, за выбранный период. Нажмите на компанию — отфильтровать.</div>
       <div class="scroll"><table id="balTbl"></table></div>
+    </div>
+  </div>
+
+  <div style="margin-bottom:16px">
+    <div class="card" id="stmtCard">
+      <h2>Выписка по счетам</h2>
+      <div class="hint" id="stmtHint">Как в банке: все операции за период по каждому счёту, с остатком после каждой операции</div>
+      <div id="stmt"></div>
     </div>
   </div>
 
@@ -496,14 +509,41 @@ function render(){
   $('kOpen').textContent = money(tO); $('kOpenS').textContent = `на начало ${dmy(S.from)}, KZT`;
   $('kClose').textContent = money(tC); $('kCloseS').textContent = `на конец ${dmy(S.to)}`+(unknown?' · нет выписки для части счетов':'');
   const curN = F.filter(o=>(o.cur||'KZT')!=='KZT').length;
-  $('kIn').textContent = money(sIn); $('kInS').textContent = `${F.filter(o=>o.dir==='in'&&(o.cur||'KZT')==='KZT').length} операций, KZT`+(curN?` · валютных: ${curN} — в таблице`:'')+(filtered?' · с учётом фильтров':'');
+  $('kIn').textContent = money(sIn); $('kInS').textContent = `${F.filter(o=>o.dir==='in'&&(o.cur||'KZT')==='KZT').length} операций, KZT`+(curN?` · валютных: ${curN} — в таблице`:'')+(filtered?' · с учётом фильтров':'')+(S.hideInt?' · без внутр. переводов':'');
   $('kOut').textContent = money(sOut); $('kOutS').textContent = `${F.filter(o=>o.dir==='out'&&(o.cur||'KZT')==='KZT').length} операций · чистый поток ${sIn-sOut>=0?'+':''}${short(sIn-sOut)}`;
 
   drawChart(F);
   barList($('artBars'), F.filter(o=>o.dir===S.artDir), o=>o.art, S.art, v=>{ S.art = S.art===v?'':v; render(); }, 20);
   barList($('cpBars'), ops.filter(o=>inScope(o,{cp:true})&&o.dir===S.cpDir), o=>o.cp, S.cp, v=>{ S.cp = S.cp===v?'':v; $('cp').value=S.cp; render(); }, 12);
-  idTable(F); opsTable(F); $('msg').textContent = buildMessage(S.msg, S.to, D.order.filter(c=>!S.comps.size||S.comps.has(c)));
+  stmtView(comps); idTable(F); opsTable(F); $('msg').textContent = buildMessage(S.msg, S.to, D.order.filter(c=>!S.comps.size||S.comps.has(c)));
   $('msgHint').textContent = S.msg==='m' ? `Остатки на утро ${dmy(nextWorkday(S.to))} (по выпискам до ${dmy(S.to)})` : `Итоги дня ${dmy(S.to)}`;
+}
+
+function stmtView(comps){
+  const nextDay=addDays(S.to,1), blocks=[]; let shown=0;
+  comps.forEach(c=>accs.filter(a=>a.company===c).forEach(a=>{
+    const per=(opsBy[a.iik]||[]).filter(o=>o.date>=S.from&&o.date<=S.to).sort((x,y)=>(x.date+' '+(x.time||'')).localeCompare(y.date+' '+(y.time||'')));
+    const op=opening(a.iik,S.from), cl=opening(a.iik,nextDay);
+    if(!per.length && !(op||cl)) return;
+    const cur=a.cur||'KZT', sIn=per.filter(o=>o.dir==='in').reduce((s,o)=>s+o.amount,0), sOut=per.filter(o=>o.dir==='out').reduce((s,o)=>s+o.amount,0);
+    let bal=op, rows='';
+    const lim=S.comps.size?1000:200;
+    per.slice(0,lim).forEach(o=>{ if(bal!=null) bal+=o.dir==='in'?o.amount:-o.amount;
+      rows+=`<tr${o.link?' class="int"':''}><td style="white-space:nowrap">${dmy(o.date)}<div class="sub">${esc(o.time||'')}</div></td><td style="white-space:nowrap">${esc(o.doc||'')}</td>
+        <td class="c">${esc(o.cp)}${o.link?` <span class="tag">${esc(o.link)}</span>`:''}</td><td class="p">${esc(o.purpose)}</td>
+        <td class="n">${o.dir==='out'?money(o.amount):''}</td><td class="n" style="color:var(--in)">${o.dir==='in'?money(o.amount):''}</td><td class="n">${bal==null?'—':money(bal)}</td></tr>`; });
+    shown+=per.length;
+    blocks.push(`<details class="stmt" ${comps.length<=3||S.comps.size?'open':''}><summary><b>${esc(c)}</b> · ${esc(a.iik)} · ${cur}
+      <span class="sub">— операций: ${per.length} · вход. остаток ${op==null?'—':money(op)} · исход. остаток ${cl==null?'—':money(cl)}</span></summary>
+      <div class="scroll"><table class="ops"><tr><th>Дата</th><th>№ док.</th><th>Контрагент</th><th>Назначение платежа</th><th class="n">Расход (Дебет)</th><th class="n">Приход (Кредит)</th><th class="n">Остаток</th></tr>
+      <tr class="tot"><td colspan="6">Входящий остаток на ${dmy(S.from)}</td><td class="n">${op==null?'—':money(op)}</td></tr>
+      ${rows||'<tr><td colspan="7" class="empty">Операций за период нет</td></tr>'}
+      ${per.length>lim?`<tr><td colspan="7" class="empty">Показаны первые ${lim} из ${per.length} — выберите компанию или сузьте период</td></tr>`:''}
+      <tr class="tot"><td colspan="4">Обороты</td><td class="n">${money(sOut)}</td><td class="n">${money(sIn)}</td><td></td></tr>
+      <tr class="tot"><td colspan="6">Исходящий остаток на конец ${dmy(S.to)}</td><td class="n">${cl==null?'—':money(cl)}</td></tr></table></div></details>`);
+  }));
+  $('stmt').innerHTML = blocks.join('') || '<div class="empty">Нет выписок за выбранный период</div>';
+  $('stmtHint').textContent = `Как в банке: все операции за период (включая внутренние переводы и депозиты), остаток после каждой операции · счетов: ${blocks.length}, операций: ${shown}`;
 }
 
 function barList(el, list, keyFn, selected, onPick, top){
@@ -578,7 +618,8 @@ function opsTable(F){
     <td class="n">${o.dir==='in'?money(o.amount)+(o.cur!=='KZT'?' '+o.cur:''):''}</td>
     <td class="n">${o.dir==='out'?money(o.amount)+(o.cur!=='KZT'?' '+o.cur:''):''}</td>
     <td class="p">${esc(o.purpose)}${o.note?`<div style="color:var(--ink)">💬 ${esc(o.note)}</div>`:''}</td></tr>`).join('');
-  $('opsTbl').innerHTML = head + (body||'<tr><td colspan="8" class="empty">Нет операций по выбранным фильтрам</td></tr>');
+  const hid = S.hideInt ? ops.filter(o=>o.link && o.date>=S.from && o.date<=S.to && (!S.comps.size||S.comps.has(o.company))).length : 0;
+  $('opsTbl').innerHTML = head + (body||`<tr><td colspan="8" class="empty">Нет операций по выбранным фильтрам${hid?` · скрыто внутренних переводов: ${hid} — снимите галочку «Без внутренних переводов» или смотрите «Выписку по счетам» выше`:''}</td></tr>`);
   $('more').style.display = arr.length>S.limit?'block':'none';
   $('opsTbl').querySelectorAll('th[data-s]').forEach(th=>th.onclick=()=>{ const c=th.dataset.s; S.sort = S.sort.k===c? {k:c,d:-S.sort.d} : {k:c,d:(c==='in'||c==='out'||c==='date')?-1:1}; render(); });
   $('opsTbl').querySelectorAll('a[data-cp]').forEach(a=>a.onclick=()=>{ S.cp=a.dataset.cp; $('cp').value=S.cp; render(); });
